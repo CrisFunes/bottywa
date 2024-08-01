@@ -3,3 +3,7 @@ bot_sessions
 baileys.log
 core.class.log
 queue.class.log
+Bot*
+dist
+bot*
+package-lock.json
