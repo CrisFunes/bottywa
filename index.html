@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BottyWA</title> 
+    <link rel="stylesheet" href="/index.css">
+    <link rel="shortcut icon" href="/icon.ico" />
+</head>
+<body>
+    <button id="darkModeToggle" onclick="toggleDarkMode()">🌓 Modo Oscuro</button>
+
+    <div class="container">
+        
+        <div class="tabs">
+            <button class="tab-button active" data-tab="instances">Instancias</button>
+            <button class="tab-button" data-tab="messages">Mensajes</button>
+            <button class="tab-button" data-tab="database">Database</button>
+        </div>
+
+        <div class="tab-content-container">
+            <div id="instances" class="tab-content">
+                <div class="left-column">
+                    <h2>Código QR</h2>
+                    <div id="qrcode">
+                        <h3>Seleccione una instancia para ver su código QR</h3>
+                        <img id="qrImage" src="" alt="QR Code" style="display:none;">
+                        <div id="qrTimer" style="display:none;"></div>
+                        <div id="connectedMessage" style="display:none;">Instancia conectada</div>
+                    </div>
+                </div>
+                <div class="right-column">
+                    <h2>Lista de Instancias</h2>
+                    <div class="instance-controls">
+                        <input type="text" id="newInstanceName" placeholder="Nombre de nueva instancia">
+                        <button onclick="createInstance()">Crear Instancia</button>
+                    </div>
+                    <div id="instancesList"></div>
+                </div>
+            </div>
+
+            <div id="messages" class="tab-content">
+                <div class="left-column">
+                    <h2>Editor de mensajes</h2>
+                    <div class="chat-simulation">
+                        <div id="chatMessages" class="chat-messages">
+                            <div class="chat-bubble-container user-message">
+                                <div class="chat-bubble" style="background-color: #128C7E;color: white;">
+                                    Hola
+                                </div>
+                            </div>
+                            <div class="chat-bubble-container">
+                                <div id="chatPreview" class="chat-bubble" contenteditable="false">Crea un nuevo mensaje de bienvenida o selecciona uno existente en la lista 👉</div>
+                                <span id="editIcon" class="edit-icon" onclick="toggleEdit()">✏️</span>
+                            </div>
+                        </div>
+                        <div class="chat-input">
+                            <textarea id="newMessage" placeholder="Escribe un nuevo mensaje..."></textarea>
+                            <button onclick="addMessage()">Crear</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="right-column">
+                    <h2>Lista de mensajes</h2>
+                    <div id="messageList"></div>
+                </div>
+            </div>
+
+            <div id="database" class="tab-content">
+                <div class="left-column">
+                    <h2>Contactos Registrados</h2>
+                    <div id="contactsList" class="contacts-table-container"></div>
+                </div>
+                <div class="right-column">
+                    <h2>Instancias</h2>
+                    <div id="databaseInstanceList"></div>
+                </div>
+            </div>
+        </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedInstanceName = null;
+        let currentMessageId = null;
+        let isDarkMode = false;
+        let isEditing = false;
+        let isConnected = false;
+        let instancesInterval;
+        let qrLoadInterval;
+        let qrGeneratedTime;
+        let qrTimerInterval;
+        let selectedDatabaseInstance = null;
+        let totalRealContacts = 0;
+        const MIN_ROWS = 20;
+
+        function startInstancesInterval() {
+            loadInstances(); // Cargar inmediatamente
+            instancesInterval = setInterval(loadInstances, 5000); // Luego cada segundo
+        }
+
+        function stopInstancesInterval() {
+            if (instancesInterval) {
+                clearInterval(instancesInterval);
+                instancesInterval = null;
+            }
+        }
+
+        function startQRLoadInterval(name) {
+            stopQRLoadInterval();
+            loadQR(name);
+            qrLoadInterval = setInterval(() => loadQR(name), 60000); // Recargar cada minuto
+        }
+
+        function stopQRLoadInterval() {
+            if (qrLoadInterval) {
+                clearInterval(qrLoadInterval);
+                qrLoadInterval = null;
+            }
+        }
+
+        function openTab(tabName) {
+            const tabContents = document.getElementsByClassName("tab-content");
+            for (let content of tabContents) {
+                content.classList.remove("active");
+            }
+
+            document.getElementById(tabName).classList.add("active");
+            
+            const tabButtons = document.getElementsByClassName("tab-button");
+            for (let button of tabButtons) {
+                button.classList.remove("active");
+            }
+            document.querySelector(`[data-tab="${tabName}"]`).classList.add("active");
+
+            // Detener todos los intervalos existentes
+            stopInstancesInterval();
+            stopQRLoadInterval();
+
+            if (tabName === 'instances') {
+                startInstancesInterval();
+                if (selectedInstanceName) {
+                    startQRLoadInterval(selectedInstanceName);
+                }
+            } else if (tabName === 'database') {
+                loadDatabaseInstances();
+            } else {
+                loadMessages();
+            }
+        }
+
+        async function loadDatabaseInstances() {
+            try {
+                const response = await fetch('/instances');
+                const instances = await response.json();
+                const instanceList = document.getElementById('databaseInstanceList');
+                instanceList.innerHTML = instances.map(instance => `
+                    <div class="instance-list-item ${instance.name === selectedDatabaseInstance ? 'selected' : ''}"
+                        onclick="selectDatabaseInstance('${instance.name}')">
+                        ${instance.name}
+                        <span class="contact-count">(${instance.contactCount} contactos)</span>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading database instances:', error);
+            }
+        }
+
+        async function selectDatabaseInstance(name) {
+            selectedDatabaseInstance = name;
+            loadDatabaseInstances(); // Actualizar la selección visual
+            await loadContacts(name);
+        }
+
+        async function loadContacts(instanceName) {
+            const contactsList = document.getElementById('contactsList');
+            try {
+                const response = await fetch(`/contacts/${instanceName}`);
+                const contacts = await response.json();
+                totalRealContacts = contacts.length;
+                
+                contactsList.innerHTML = `
+                    <table class="contacts-table">
+                        <thead>
+                            <tr>
+                                <th>Teléfono</th>
+                                <th>Mensaje de Respuesta</th>
+                                <th>
+                                    Fecha y Hora
+                                    <span class="calendar-icon" onclick="toggleDateFilter()">📅</span>
+                                    <span class="records-count" id="recordsCount"></span>
+                                    <div class="date-filter-container">
+                                        <input type="date" id="startDate" onchange="filterContacts()">
+                                        <input type="date" id="endDate" onchange="filterContacts()">
+                                    </div>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="contactsTableBody">
+                            ${generateContactRows(contacts)}
+                        </tbody>
+                    </table>
+                `;
+                updateRecordsCount(totalRealContacts);
+            } catch (error) {
+                console.error('Error loading contacts:', error);
+                contactsList.innerHTML = `<div class="error-message">Error al cargar los contactos: ${error.message}</div>`;
+            }
+        }
+
+        function generateContactRows(contacts) {
+            if (contacts.length === 0) {
+                return `<tr><td colspan="3" class="empty-message">No hay contactos registrados</td></tr>`;
+            }
+            const contactRows = contacts.map((contact, index) => `
+                <tr class="contact-row">
+                    <td><span class="delete-icon" onclick="deleteContact('${selectedDatabaseInstance}', '${contact.phone}')">❌</span> ${contact.phone}</td>
+                    <td>
+                        <div class="response-message-container">
+                            <div class="response-message" id="message-${index}">
+                                ${contact.responseMessage || 'No disponible'}
+                                </div>
+                                <span class="expand-button" onclick="toggleMessage(${index})">Ver más</span>
+                                </div>
+                                </td>
+                    <td>${contact.date} ${contact.time}</td>
+                </tr>
+            `).join('');
+            const emptyRows = generateEmptyRows(Math.max(0, MIN_ROWS - contacts.length));
+            return contactRows + emptyRows;
+        }
+
+        function generateEmptyRows(count) {
+            return Array(count).fill(`
+                <tr class="empty-row">
+                    <td class="empty-cell"></td>
+                    <td class="empty-cell"></td>
+                    <td class="empty-cell"></td>
+                </tr>
+            `).join('');
+        }
+
+        function toggleMessage(index) {
+            const messageElement = document.getElementById(`message-${index}`);
+            const expandButton = messageElement.nextElementSibling;
+            
+            if (messageElement.classList.contains('expanded')) {
+                messageElement.classList.remove('expanded');
+                expandButton.textContent = 'Ver más';
+            } else {
+                messageElement.classList.add('expanded');
+                expandButton.textContent = 'Ver menos';
+            }
+        }
+
+        function toggleDateFilter() {
+            const dateFilterContainer = document.querySelector('.date-filter-container');
+            const calendarIcon = document.querySelector('.calendar-icon');
+            if (dateFilterContainer.style.display === 'none' || dateFilterContainer.style.display === '') {
+                dateFilterContainer.style.display = 'block';
+                calendarIcon.parentElement.classList.add('filter-active');
+            } else {
+                dateFilterContainer.style.display = 'none';
+                calendarIcon.parentElement.classList.remove('filter-active');
+                document.getElementById('startDate').value = '';
+                document.getElementById('endDate').value = '';
+                filterContacts();
+            }
+        }
+
+        function filterContacts() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const contactsTableBody = document.getElementById('contactsTableBody');
+            const rows = contactsTableBody.getElementsByClassName('contact-row');
+            let visibleCount = 0;
+
+            for (let i = 0; i < rows.length; i++) {
+                const dateCell = rows[i].getElementsByTagName('td')[2];
+                if (dateCell) {
+                    const rowDate = dateCell.textContent.split(' ')[0];
+                    if ((startDate === '' || rowDate >= startDate) && (endDate === '' || rowDate <= endDate)) {
+                        rows[i].style.display = '';
+                        visibleCount++;
+                    } else {
+                        rows[i].style.display = 'none';
+                    }
+                }
+            }
+
+            updateRecordsCount(visibleCount);
+        }
+
+        function updateRecordsCount(count) {
+            const countElement = document.getElementById('recordsCount');
+            countElement.textContent = `(Total: ${count})`;
+        }
+
+        async function deleteContact(instanceName, phone) {
+            try {
+                const response = await fetch(`/contacts/${instanceName}/${phone}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const result = await response.json();
+                if (result.success) {
+                    await loadContacts(instanceName);
+                    await loadDatabaseInstances();
+                } else {
+                    throw new Error(result.error || 'Error desconocido al eliminar el contacto');
+                }
+            } catch (error) {
+                console.error('Error deleting contact:', error);
+                alert(`Error al eliminar el contacto: ${error.message}`);
+            }
+        }
+
+
+        async function loadInstances() {
+            try {
+                const response = await fetch('/instances');
+                const instances = await response.json();
+                const instancesList = document.getElementById('instancesList');
+                instancesList.innerHTML = instances.map(instance => `
+                    <div class="instance-item ${instance.name === selectedInstanceName ? 'selected' : ''}" onclick="selectInstance('${instance.name}', '${instance.status}')">
+                        <h3>${instance.name}</h3>
+                        <p>Estado: ${instance.status}</p>
+                        <button class="delete-button" onclick="deleteInstance('${instance.name}', event)">
+                            Eliminar
+                        </button>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading instances:', error);
+            }
+        }
+
+        async function restartInstance(botName, event) {
+            event.stopPropagation();
+            const button = event.target;
+            
+            if (button.classList.contains('disabled')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/instances/${botName}/restart`, { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    console.log(`Instance ${botName} restarted successfully`);
+                    loadInstances(); // Recargar todas las instancias
+                } else {
+                    console.error(`Error restarting instance: ${result.error}`);
+                }
+            } catch (error) {
+                console.error('Error restarting instance:', error);
+            }
+        }
+
+
+
+        function selectInstance(name, status) {
+            if (selectedInstanceName === name) {
+                selectedInstanceName = null;
+                hideQRRelatedElements();
+            } else {
+                selectedInstanceName = name;
+                if (status === 'Connected') {
+                    hideQRRelatedElements();
+                    document.getElementById('connectedMessage').style.display = 'block';
+                } else {
+                    showQRRelatedElements();
+                    loadQR(name);
+                    startQRLoadInterval(name);
+                }
+            }
+            loadInstances();
+        }
+
+        function hideQRRelatedElements() {
+            document.getElementById('qrImage').style.display = 'none';
+            document.getElementById('qrTimer').style.display = 'none';
+            document.getElementById('connectedMessage').style.display = 'none';
+            document.querySelector('#qrcode h3').style.display = 'block';
+            stopQRLoadInterval();
+            clearInterval(qrTimerInterval);
+        }
+
+        function showQRRelatedElements() {
+            document.querySelector('#qrcode h3').style.display = 'none';
+            document.getElementById('connectedMessage').style.display = 'none';
+        }
+
+        async function loadQR(botName) {
+            if (!botName) return;
+            const qrImage = document.getElementById('qrImage');
+            const qrTimer = document.getElementById('qrTimer');
+            
+            try {
+                const response = await fetch(`/qr/${botName}?t=${new Date().getTime()}`);
+                if (response.ok) {
+                    qrGeneratedTime = new Date(response.headers.get('X-QR-Generated-Time'));
+                    qrImage.src = URL.createObjectURL(await response.blob());
+                    qrImage.style.display = 'block';
+                    qrTimer.style.display = 'block';
+                    startQRTimer();
+                } else {
+                    throw new Error('QR not available');
+                }
+            } catch (error) {
+                console.error('Error loading QR:', error);
+                hideQRRelatedElements();
+                document.querySelector('#qrcode h3').textContent = 'QR code not available';
+                document.querySelector('#qrcode h3').style.display = 'block';
+            }
+        }
+
+        function startQRTimer() {
+            clearInterval(qrTimerInterval);
+            updateQRTimer();
+            qrTimerInterval = setInterval(updateQRTimer, 1000);
+        }
+
+        function updateQRTimer() {
+            const now = new Date();
+            const timeDiff = now - qrGeneratedTime;
+            const secondsLeft = 60 - Math.floor(timeDiff / 1000);
+            
+            if (secondsLeft > 0) {
+                document.getElementById('qrTimer').textContent = `QR expira en: ${secondsLeft} segundos`;
+            } else {
+                document.getElementById('qrTimer').textContent = 'QR expirado. Reinicie consola.';
+                loadQR(selectedInstanceName); // Recargar QR
+            }
+        }
+
+        async function createInstance() {
+            const nameInput = document.getElementById('newInstanceName');
+            const name = nameInput.value.trim();
+            if (!name) {
+                alert('Por favor, ingrese un nombre para la nueva instancia');
+                return;
+            }
+            try {
+                const response = await fetch('/instances', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(`Instancia ${name} creada con éxito`);
+                    nameInput.value = '';
+                    loadInstances();
+                } else {
+                    alert(`Error al crear la instancia: ${result.error}`);
+                }
+            } catch (error) {
+                console.error('Error creating instance:', error);
+                alert('Error al crear la instancia');
+            }
+        }
+
+        async function deleteInstance(name, event) {
+            event.stopPropagation();
+            if (!confirm(`¿Está seguro de que desea eliminar la instancia "${name}"?`)) {
+                return;
+            }
+            try {
+                const response = await fetch(`/instances/${name}`, { method: 'DELETE' });
+                const result = await response.json();
+                if (result.success) {
+                    alert(`Instancia ${name} eliminada con éxito`);
+                    if (selectedInstanceName === name) {
+                        selectedInstanceName = null;
+                        hideQRRelatedElements();
+                    }
+                    loadInstances();
+                } else {
+                    alert(`Error al eliminar la instancia: ${result.error}`);
+                }
+            } catch (error) {
+                console.error('Error deleting instance:', error);
+                alert('Error al eliminar la instancia');
+            }
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            const tabButtons = document.querySelectorAll(".tab-button");
+            tabButtons.forEach(button => {
+                button.addEventListener("click", function() {
+                    const tabName = this.getAttribute("data-tab");
+                    openTab(tabName);
+                });
+            });
+
+            openTab('instances');
+        });
+
+        // Event listeners para manejar la visibilidad de la página
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopInstancesInterval();
+                stopQRLoadInterval();
+            } else {
+                if (document.querySelector('[data-tab="instances"]').classList.contains('active')) {
+                    startInstancesInterval();
+                    if (selectedInstanceName) {
+                        startQRLoadInterval(selectedInstanceName);
+                    }
+                }
+            }
+        });
+
+        document.querySelectorAll(".tab-button").forEach(button => {
+            button.addEventListener("click", (e) => {
+                openTab(e.target.getAttribute("data-tab"));
+            });
+        });
+
+        function loadMessages() {
+            fetch('/messages')
+                .then(response => response.json())
+                .then(messages => {
+                    const messageList = document.getElementById('messageList');
+                    messageList.innerHTML = '';
+                    messages.forEach((message, index) => {
+                        const messageElement = document.createElement('div');
+                        messageElement.className = 'message-item';
+                        messageElement.innerHTML = `
+                            <pre class="message-content">${escapeHtml(message)}</pre>
+                            <button onclick="deleteMessage(${index}, event)">Eliminar</button>
+                        `;
+                        messageElement.onclick = () => selectMessage(message, messageElement, index);
+                        messageList.appendChild(messageElement);
+                    });
+                });
+        }
+
+        function selectMessage(message, element, id) {
+            document.querySelectorAll('.message-item').forEach(item => item.classList.remove('selected'));
+            element.classList.add('selected');
+            previewMessage(message);
+            currentMessageId = id;
+            document.getElementById('editIcon').style.display = 'inline';
+        }
+
+        function addMessage() {
+            const message = document.getElementById('newMessage').value;
+            fetch('/messages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('newMessage').value = '';
+                    loadMessages();
+                    previewMessage(message);
+                    currentMessageId = null;
+                    document.getElementById('editIcon').style.display = 'none';
+                }
+            });
+        }
+
+        function deleteMessage(id, event) {
+            event.stopPropagation();
+            fetch(`/messages/${id}`, { method: 'DELETE' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadMessages();
+                    if (currentMessageId === id) {
+                        previewMessage("Escribe un nuevo mensaje de bienvenida o selecciona uno existente");
+                        currentMessageId = null;
+                        document.getElementById('editIcon').style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        function previewMessage(message) {
+            const chatPreview = document.getElementById('chatPreview');
+            chatPreview.textContent = message.trim(); // Añadimos .trim() aquí
+        }
+
+        function toggleEdit() {
+            const chatPreview = document.getElementById('chatPreview');
+            const editIcon = document.getElementById('editIcon');
+            isEditing = !isEditing;
+            
+            if (isEditing) {
+                chatPreview.contentEditable = 'true';
+                chatPreview.focus();
+                editIcon.innerHTML = '✅';
+            } else {
+                chatPreview.contentEditable = 'false';
+                editIcon.innerHTML = '✏️';
+                const cancelButton = editIcon.nextElementSibling;
+                if (cancelButton) cancelButton.remove();
+                if (currentMessageId !== null) {
+                    updateMessage(currentMessageId, chatPreview.textContent);
+                }
+            }
+        }
+
+        function initializeEditButton() {
+            const editIcon = document.getElementById('editIcon');
+            editIcon.style.display = currentMessageId !== null ? 'inline' : 'none';
+        }
+
+        function updateMessage(id, newMessage) {
+            fetch(`/messages/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: newMessage })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadMessages();
+                }
+            });
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        }
+
+        function toggleDarkMode() {
+            isDarkMode = !isDarkMode;
+            document.body.classList.toggle('dark-mode');
+            const button = document.getElementById('darkModeToggle');
+            button.textContent = isDarkMode ? '☀️ Modo Claro' : '🌓 Modo Oscuro';
+        }
+
+        document.getElementById('newMessage').addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+            previewMessage(this.value);
+        });
+
+        loadMessages();
+        initializeEditButton();
+    </script>
+</body>
+</html>
