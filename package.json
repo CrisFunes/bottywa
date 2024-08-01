@@ -1,29 +1,69 @@
 {
-    "name": "base-bailey-json",
+    "name": "bottywa",
     "version": "1.0.0",
     "description": "",
     "main": "app.js",
+    "bin": "app.js",
     "scripts": {
         "prestart": "npx eslint . --no-ignore",
-        "pre-copy": "cd .. && npm run  copy.lib base-baileys-json",
-        "start": "node app.js"
+        "pre-copy": "cd .. && npm run  copy.lib bottywa",
+        "start": "node app.js",
+        "build": "node build.js"
     },
-    "keywords": [],
+    "pkg": {
+        "scripts": [
+            "app.js"
+        ],
+        "assets": [
+            "node_modules/@bot-whatsapp/provider/baileys/**/*",
+            "node_modules/@bot-whatsapp/database/mock/**/*",
+            "node_modules/sharp/build/Release/**/*",
+            "node_modules/sharp/vendor/lib/**/*",
+            "node_modules/@hapi/joi/lib/index.js",
+            "node_modules/@whiskeysockets/baileys/**/*",
+            "node_modules/@adiwajshing/**/*",
+            "node_modules/@hapi/**/*",
+            "node_modules/got/**/*",
+            "node_modules/cacheable-request/**/*",
+            "node_modules/keyv/**/*",
+            "node_modules/@bot-whatsapp/**/*",
+            "node_modules/@whiskeysockets/**/*",
+            "node_modules/sharp/**/*",
+            "node_modules/@hapi/**/*",
+            "node_modules/axios/**/*",
+            "node_modules/codec-parser/**/*",
+            "node_modules/@ffmpeg-installer/**/*",
+            "index.css",
+            "index.html",
+            "icon.ico"
+        ],
+        "targets": [
+            "node14-win-x64"
+        ],
+        "outputPath": "dist"
+    },
     "dependencies": {
         "@bot-whatsapp/bot": "latest",
         "@bot-whatsapp/cli": "latest",
         "@bot-whatsapp/database": "latest",
-        "@bot-whatsapp/provider": "latest",
         "@bot-whatsapp/portal": "latest",
+        "@bot-whatsapp/provider": "latest",
+        "@ffmpeg-installer/ffmpeg": "^1.1.0",
         "mime-types": "2.1.35",
         "@whiskeysockets/baileys": "6.5.0",
-        "wa-sticker-formatter": "4.4.4",
-        "cache-manager": "5.2.4"
+        "axios": "^1.7.2",
+        "body-parser": "^1.20.2",
+        "cache-manager": "5.2.4",
+        "express": "^4.19.2",
+        "node-cron": "^3.0.3",
+        "nodemailer": "^6.9.14",
+        "qrcode": "^1.5.3",
+        "socket.io": "^4.7.5",
+        "wa-sticker-formatter": "4.4.4"
     },
     "devDependencies": {
         "eslint-plugin-bot-whatsapp": "latest",
-        "eslint": "^8.52.0"
-    },
-    "author": "",
-    "license": "ISC"
+        "eslint": "^8.52.0",
+        "rcedit": "^4.0.1"
+    }
 }
